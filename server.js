@@ -54,21 +54,27 @@ app.get("/poster/oauth/callback", async (req, res) => {
 
     const data = response.data;
 
-    const { error } = await supabase.from("poster_connections").upsert({
+  const { error } = await supabase
+  .from("poster_connections")
+  .upsert(
+    {
       poster_account_id: account,
       access_token: data.access_token,
       refresh_token: data.refresh_token || null,
       token_expires_at: data.expires_in
         ? new Date(Date.now() + data.expires_in * 1000).toISOString()
         : null,
-      scopes: data.scope ? String(data.scope).split(",") : null,
       raw_oauth_payload: data,
-    });
-
-    if (error) {
-      console.error("Supabase upsert error:", error);
-      return res.status(500).send("Failed to save Poster connection");
+    },
+    {
+      onConflict: "poster_account_id",
     }
+  );
+
+if (error) {
+  console.error("Supabase upsert error:", error);
+  return res.status(500).send("Failed to save Poster connection");
+}
 
     res.send("Poster connected successfully ✅");
   } catch (error) {
