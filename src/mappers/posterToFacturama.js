@@ -1,3 +1,32 @@
+function tryParseJson(value) {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  try {
+    return JSON.parse(value);
+  } catch (_) {
+    return value;
+  }
+}
+
+function normalizePosterWebhookPayload(webhookPayload) {
+  if (!webhookPayload || typeof webhookPayload !== "object") {
+    return webhookPayload;
+  }
+
+  const normalized = { ...webhookPayload };
+  normalized.data = tryParseJson(normalized.data);
+
+  if (normalized.data && typeof normalized.data === "object") {
+    for (const [key, value] of Object.entries(normalized.data)) {
+      normalized.data[key] = tryParseJson(value);
+    }
+  }
+
+  return normalized;
+}
+
 function isInvoiceRequested(webhookPayload) {
   return Boolean(
     webhookPayload?.invoiceRequested ||
@@ -9,6 +38,8 @@ function isInvoiceRequested(webhookPayload) {
 
 function getTransactionId(webhookPayload) {
   return (
+    webhookPayload?.object_id ||
+    webhookPayload?.objectId ||
     webhookPayload?.transaction_id ||
     webhookPayload?.transactionId ||
     webhookPayload?.order?.id ||
@@ -60,6 +91,7 @@ function mapToFacturamaInvoice({ webhookPayload, config }) {
 }
 
 module.exports = {
+  normalizePosterWebhookPayload,
   isInvoiceRequested,
   getTransactionId,
   mapToFacturamaInvoice

@@ -6,7 +6,12 @@ const { JsonStore } = require("./storage");
 const { PosterService } = require("./services/poster");
 const { FacturamaService } = require("./services/facturama");
 const { createSupabasePersistence } = require("./supabase");
-const { getTransactionId, isInvoiceRequested, mapToFacturamaInvoice } = require("./mappers/posterToFacturama");
+const {
+  normalizePosterWebhookPayload,
+  getTransactionId,
+  isInvoiceRequested,
+  mapToFacturamaInvoice
+} = require("./mappers/posterToFacturama");
 const { buildMonthlyFinancialReports, DEFAULT_CHART_OF_ACCOUNTS } = require("./reporting/monthlyReports");
 
 const app = express();
@@ -145,7 +150,7 @@ app.post("/poster/webhook", async (req, res) => {
       return res.status(401).json({ ok: false, error: "Invalid webhook secret" });
     }
 
-    const event = req.body || {};
+    const event = normalizePosterWebhookPayload(req.body || {});
     const transactionId = getTransactionId(event);
 
     if (!transactionId) {

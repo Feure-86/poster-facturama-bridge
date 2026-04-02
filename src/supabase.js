@@ -65,12 +65,15 @@ function createSupabasePersistence(config) {
     async insertTicketLog({ event, transactionId, invoiceId = null, status = "received" }) {
       const total = Number(event?.total || event?.order?.total || event?.data?.total || 0);
       const accountId = String(event?.account_id || event?.account || event?.accountId || "").trim() || null;
+      const normalizedTicketId = String(transactionId || event?.object_id || event?.data?.id || event?.id || "unknown");
 
       const row = {
-        poster_ticket_id: String(transactionId || event?.data?.id || event?.id || "unknown"),
+        poster_ticket_id: normalizedTicketId,
         poster_account_id: accountId,
+        ticket_number: normalizedTicketId,
         raw_payload: event,
         total,
+        currency: event?.currency || "MXN",
         status,
         invoice_id: invoiceId
       };
@@ -85,8 +88,10 @@ function createSupabasePersistence(config) {
       const fallbackRow = {
         poster_ticket_id: row.poster_ticket_id,
         poster_account_id: row.poster_account_id,
+        ticket_number: row.ticket_number,
         raw_payload: row.raw_payload,
-        total: row.total
+        total: row.total,
+        currency: row.currency
       };
       const fallbackInsert = await client.from("tickets").upsert(fallbackRow, {
         onConflict: "poster_ticket_id"
