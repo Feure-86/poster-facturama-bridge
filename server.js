@@ -31,10 +31,14 @@ app.get("/poster/connect", (req, res) => {
 // =========================
 app.get("/poster/oauth/callback", async (req, res) => {
   try {
-    const { code } = req.query;
+    const { code, account } = req.query;
 
     if (!code) {
       return res.status(400).send("Missing code");
+    }
+
+    if (!account) {
+      return res.status(400).send("Missing account");
     }
 
     const response = await axios.post(
@@ -50,19 +54,25 @@ app.get("/poster/oauth/callback", async (req, res) => {
 
     const data = response.data;
 
-    await supabase.from("poster_connections").upsert({
-      poster_account_id: data.account_id,
+    const { error } = await supabase.from("poster_connections").upsert({
+      poster_account_id: account,
       access_token: data.access_token,
-      refresh_token: data.refresh_token,
+      refresh_token: data.refresh_token || null,
       token_expires_at: data.expires_in
-        ? new Date(Date.now() + data.expires_in * 1000)
+        ? new Date(Date.now() + data.expires_in * 1000).toISOString()
         : null,
+      scopes: data.scope ? String(data.scope).split(",") : null,
       raw_oauth_payload: data,
     });
 
+    if (error) {
+      console.error("Supabase upsert error:", error);
+      return res.status(500).send("Failed to save Poster connection");
+    }
+
     res.send("Poster connected successfully ✅");
   } catch (error) {
-    console.error(error.response?.data || error.message);
+    console.error("OAuth error:", error.response?.data || error.message);
     res.status(500).send("OAuth error");
   }
 });
@@ -74,23 +84,26 @@ app.post("/poster/webhook", async (req, res) => {
   try {
     const payload = req.body;
 
-    console.log("Webhook received:", payload);
+    console.log("Webhook received:", JSON.stringify(payload, null, 2));
 
-    // Store ticket
-    await supabase.from("tickets").insert({
-      poster_ticket_id: payload?.data?.id || "unknown",
-      poster_account_id: payload?.account_id || "unknown",
+    const { error } = await supabase.from("tickets").insert({
+      poster_ticket_id: String(payload?.data?.id || "unknown"),
+      poster_account_id: String(payload?.account_id || payload?.account || "unknown"),
       raw_payload: payload,
       total: payload?.data?.total || 0,
     });
 
+    if (error) {
+      console.error("Supabase ticket insert error:", error);
+      return res.status(500).send("Webhook DB error");
+    }
+
     res.status(200).send("OK");
   } catch (error) {
-    console.error(error);
+    console.error("Webhook error:", error);
     res.status(500).send("Webhook error");
   }
 });
-
 // =========================
 // Start server
 // =========================
