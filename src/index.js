@@ -5,6 +5,7 @@ const { config } = require("./config");
 const { JsonStore } = require("./storage");
 const { PosterService } = require("./services/poster");
 const { FacturamaService } = require("./services/facturama");
+const { createSupabasePersistence } = require("./supabase");
 const { getTransactionId, isInvoiceRequested, mapToFacturamaInvoice } = require("./mappers/posterToFacturama");
 const { buildMonthlyFinancialReports, DEFAULT_CHART_OF_ACCOUNTS } = require("./reporting/monthlyReports");
 
@@ -13,6 +14,16 @@ app.use(express.json({ limit: "2mb" }));
 
 const posterTokenStore = new JsonStore(path.join(config.dataDir, "poster-tokens.json"));
 const processedSaleStore = new JsonStore(path.join(config.dataDir, "processed-sales.json"));
+const persistence = createSupabasePersistence(config);
+
+async function persistSafely(label, operation) {
+  try {
+    return await operation();
+  } catch (error) {
+    console.warn(`${label} warning:`, error.message);
+    return null;
+  }
+}
 
 const posterService = new PosterService(
   {
@@ -28,7 +39,12 @@ const posterService = new PosterService(
 const facturamaService = new FacturamaService(config.facturama);
 
 app.get("/health", async (_req, res) => {
-  res.json({ ok: true, service: "poster-facturama-middleware", time: new Date().toISOString() });
+  res.json({
+    ok: true,
+    service: "poster-facturama-middleware",
+    persistence: persistence.enabled ? "supabase+file" : "file",
+    time: new Date().toISOString()
+  });
 });
 
 app.post("/reports/monthly", async (req, res) => {
@@ -104,6 +120,11 @@ app.get("/poster/oauth/callback", async (req, res) => {
       String(accountId || account || payload.account_id || payload.accountId || payload.account || payload.user_id || "")
         .trim() || null;
     const installation = await posterService.saveInstallation({ accountId: normalizedAccountId, payload });
+    if (persistence.enabled) {
+      await persistSafely("Supabase poster connection", () =>
+        persistence.savePosterConnection({ accountId: normalizedAccountId, payload })
+      );
+    }
 
     res.status(200).json({
       ok: true,
@@ -128,6 +149,15 @@ app.post("/poster/webhook", async (req, res) => {
     const transactionId = getTransactionId(event);
 
     if (!transactionId) {
+      if (persistence.enabled) {
+        await persistSafely("Supabase ticket log", () =>
+          persistence.insertTicketLog({
+            event,
+            transactionId: event?.data?.id || event?.id || "unknown",
+            status: "missing-transaction-id"
+          })
+        );
+      }
       return res.status(200).json({
         ok: true,
         skipped: true,
@@ -137,6 +167,16 @@ app.post("/poster/webhook", async (req, res) => {
 
     const alreadyProcessed = await processedSaleStore.get(transactionId);
     if (alreadyProcessed) {
+      if (persistence.enabled) {
+        await persistSafely("Supabase ticket log", () =>
+          persistence.insertTicketLog({
+            event,
+            transactionId,
+            invoiceId: alreadyProcessed.invoiceId || null,
+            status: "duplicate"
+          })
+        );
+      }
       return res.status(200).json({ ok: true, duplicate: true, invoiceId: alreadyProcessed.invoiceId || null });
     }
 
@@ -146,6 +186,15 @@ app.post("/poster/webhook", async (req, res) => {
         reason: "invoice-not-requested",
         processedAt: new Date().toISOString()
       });
+      if (persistence.enabled) {
+        await persistSafely("Supabase ticket log", () =>
+          persistence.insertTicketLog({
+            event,
+            transactionId,
+            status: "invoice-not-requested"
+          })
+        );
+      }
       return res.status(200).json({ ok: true, skipped: true, reason: "invoice-not-requested" });
     }
 
@@ -157,6 +206,16 @@ app.post("/poster/webhook", async (req, res) => {
       invoiceId: invoice?.Id || invoice?.id || null,
       invoice
     });
+    if (persistence.enabled) {
+      await persistSafely("Supabase ticket log", () =>
+        persistence.insertTicketLog({
+          event,
+          transactionId,
+          invoiceId: invoice?.Id || invoice?.id || null,
+          status: "invoiced"
+        })
+      );
+    }
 
     return res.status(201).json({
       ok: true,

@@ -21,6 +21,10 @@ const config = {
   port: Number(process.env.PORT || 3000),
   publicBaseUrl: process.env.PUBLIC_BASE_URL.replace(/\/$/, ""),
   dataDir: path.resolve(process.cwd(), "data"),
+  supabase: {
+    url: (process.env.SUPABASE_URL || "").replace(/\/$/, ""),
+    serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || ""
+  },
   poster: {
     clientId: process.env.POSTER_CLIENT_ID,
     clientSecret: process.env.POSTER_CLIENT_SECRET,

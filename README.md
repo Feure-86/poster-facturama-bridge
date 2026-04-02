@@ -14,7 +14,8 @@ Backend API that receives sales events from Poster and creates CFDI invoices in 
 - Poster webhook ingestion (`/poster/webhook`)
 - Idempotent invoice generation by transaction ID
 - Facturama invoice creation via Basic Auth API
-- File-based storage for tokens and processed transactions (`data/*.json`)
+- Supabase-backed storage for Poster connections and ticket logs when configured
+- File-based fallback storage for tokens and processed transactions (`data/*.json`)
 - Monthly financial reporting endpoint for Workflow 3 (`/reports/monthly`)
 
 ## Quick start
@@ -44,11 +45,17 @@ See `.env.example` for full list. Required:
 - `FACTURAMA_USERNAME`
 - `FACTURAMA_PASSWORD`
 
+Optional but recommended for persistent storage:
+
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
 ## Notes
 
 - Webhook payload formats differ by Poster event type and account setup.
 - Mapping file is `src/mappers/posterToFacturama.js`. Adjust this to match your exact payload and CFDI rules.
 - If you set `POSTER_WEBHOOK_SECRET`, the middleware validates either `x-poster-webhook-secret` or `x-webhook-secret` header.
+- When Supabase is configured, Poster OAuth connections are upserted into `poster_connections` and webhook payloads are inserted into `tickets`.
 
 ## Monthly reporting layer
 
