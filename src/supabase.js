@@ -75,7 +75,9 @@ function createSupabasePersistence(config) {
         invoice_id: invoiceId
       };
 
-      const { error } = await client.from("tickets").insert(row);
+      const { error } = await client.from("tickets").upsert(row, {
+        onConflict: "poster_ticket_id"
+      });
       if (!error) {
         return row;
       }
@@ -86,9 +88,11 @@ function createSupabasePersistence(config) {
         raw_payload: row.raw_payload,
         total: row.total
       };
-      const fallbackInsert = await client.from("tickets").insert(fallbackRow);
+      const fallbackInsert = await client.from("tickets").upsert(fallbackRow, {
+        onConflict: "poster_ticket_id"
+      });
       if (fallbackInsert.error) {
-        throw new Error(`Supabase tickets insert failed: ${fallbackInsert.error.message}`);
+        throw new Error(`Supabase tickets write failed: ${fallbackInsert.error.message}`);
       }
 
       return fallbackRow;
