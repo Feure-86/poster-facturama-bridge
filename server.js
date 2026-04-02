@@ -22,8 +22,7 @@ app.get("/health", (req, res) => {
 // Poster OAuth start
 // =========================
 app.get("/poster/connect", (req, res) => {
-  const redirectUrl = `https://joinposter.com/api/oauth?response_type=code&client_id=${process.env.POSTER_CLIENT_ID}&redirect_uri=${process.env.APP_BASE_URL}/poster/oauth/callback`;
-
+ const redirectUrl = `https://joinposter.com/api/v2/auth?response_type=code&client_id=${process.env.POSTER_CLIENT_ID}&redirect_uri=${process.env.APP_BASE_URL}/poster/oauth/callback`;
   res.redirect(redirectUrl);
 });
 
