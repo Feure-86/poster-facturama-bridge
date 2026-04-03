@@ -37,8 +37,14 @@ function createSupabasePersistence(config) {
       async getTicketByNumber() {
         return null;
       },
+      async getTicketItemsByTicketId() {
+        return [];
+      },
       async insertTicketLog() {
         return null;
+      },
+      async upsertTicketItems() {
+        return [];
       }
     };
   }
@@ -113,6 +119,24 @@ function createSupabasePersistence(config) {
 
       return data || null;
     },
+    async getTicketItemsByTicketId(ticketId) {
+      const normalizedTicketId = String(ticketId || "").trim();
+      if (!normalizedTicketId) {
+        return [];
+      }
+
+      const { data, error } = await client
+        .from("ticket_items")
+        .select("*")
+        .eq("ticket_id", normalizedTicketId)
+        .order("product_name", { ascending: true });
+
+      if (error) {
+        throw new Error(`Supabase ticket_items read failed: ${error.message}`);
+      }
+
+      return data || [];
+    },
     async insertTicketLog({ event, transactionId, invoiceId = null, status = "received", transactionDetail = null }) {
       const total = transactionDetail?.payed_sum
         ? centsToAmount(transactionDetail.payed_sum)
@@ -137,11 +161,15 @@ function createSupabasePersistence(config) {
         invoice_id: invoiceId
       };
 
-      const { error } = await client.from("tickets").upsert(row, {
-        onConflict: "poster_ticket_id"
-      });
+      const { data, error } = await client
+        .from("tickets")
+        .upsert(row, {
+          onConflict: "poster_ticket_id"
+        })
+        .select("*")
+        .maybeSingle();
       if (!error) {
-        return row;
+        return data || row;
       }
 
       const fallbackRow = {
@@ -152,14 +180,51 @@ function createSupabasePersistence(config) {
         total: row.total,
         currency: row.currency
       };
-      const fallbackInsert = await client.from("tickets").upsert(fallbackRow, {
-        onConflict: "poster_ticket_id"
-      });
+      const fallbackInsert = await client
+        .from("tickets")
+        .upsert(fallbackRow, {
+          onConflict: "poster_ticket_id"
+        })
+        .select("*")
+        .maybeSingle();
       if (fallbackInsert.error) {
         throw new Error(`Supabase tickets write failed: ${fallbackInsert.error.message}`);
       }
 
-      return fallbackRow;
+      return fallbackInsert.data || fallbackRow;
+    },
+    async upsertTicketItems({ ticketId, posterTicketId, items }) {
+      if (!ticketId || !posterTicketId || !Array.isArray(items) || items.length === 0) {
+        return [];
+      }
+
+      const rows = items.map((item) => ({
+        ticket_id: ticketId,
+        poster_ticket_id: String(posterTicketId),
+        product_id: String(item.product_id),
+        product_name: item.product_name || null,
+        category_id: item.category_id != null ? String(item.category_id) : null,
+        category_name: item.category_name || null,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        line_total: item.line_total,
+        is_tax_exempt: item.is_tax_exempt,
+        tax_rate: item.tax_rate,
+        raw_payload: item.raw_payload || item
+      }));
+
+      const { data, error } = await client
+        .from("ticket_items")
+        .upsert(rows, {
+          onConflict: "poster_ticket_id,product_id"
+        })
+        .select("*");
+
+      if (error) {
+        throw new Error(`Supabase ticket_items write failed: ${error.message}`);
+      }
+
+      return data || rows;
     }
   };
 }

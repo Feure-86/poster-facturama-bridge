@@ -121,6 +121,49 @@ class PosterService {
       "https://joinposter.com/api/dash.getTransaction"
     ].filter(Boolean);
 
+    const payload = await this.fetchFromEndpoints(endpoints, qs, "Poster transaction fetch failed");
+    const normalized = payload?.response || payload?.data || payload;
+    const transaction = Array.isArray(normalized) ? normalized[0] : normalized;
+    if (transaction && typeof transaction === "object") {
+      return transaction;
+    }
+
+    throw new Error(`Poster transaction fetch returned no transaction: ${JSON.stringify(payload)}`);
+  }
+
+  async getTransactionProducts({ accountId, accessToken, transactionId }) {
+    const qs = querystring.stringify({
+      token: accessToken,
+      transaction_id: transactionId
+    });
+
+    const endpoints = [
+      accountId ? `https://${accountId}.joinposter.com/api/dash.getTransactionProducts` : null,
+      "https://joinposter.com/api/dash.getTransactionProducts"
+    ].filter(Boolean);
+
+    const payload = await this.fetchFromEndpoints(endpoints, qs, "Poster transaction products fetch failed");
+    const normalized = payload?.response || payload?.data || payload;
+    return Array.isArray(normalized) ? normalized : normalized ? [normalized] : [];
+  }
+
+  async getCategoryDetails({ accountId, accessToken, categoryId }) {
+    const qs = querystring.stringify({
+      token: accessToken,
+      category_id: categoryId
+    });
+
+    const endpoints = [
+      accountId ? `https://${accountId}.joinposter.com/api/menu.getCategory` : null,
+      "https://joinposter.com/api/menu.getCategory"
+    ].filter(Boolean);
+
+    const payload = await this.fetchFromEndpoints(endpoints, qs, "Poster category fetch failed");
+    const normalized = payload?.response || payload?.data || payload;
+    return Array.isArray(normalized) ? normalized[0] || null : normalized || null;
+  }
+
+  async fetchFromEndpoints(endpoints, qs, errorPrefix) {
     const errors = [];
     for (const endpoint of endpoints) {
       try {
@@ -144,19 +187,13 @@ class PosterService {
           continue;
         }
 
-        const normalized = payload?.response || payload?.data || payload;
-        const transaction = Array.isArray(normalized) ? normalized[0] : normalized;
-        if (transaction && typeof transaction === "object") {
-          return transaction;
-        }
-
-        errors.push({ endpoint, status: response.status, payload });
+        return payload;
       } catch (error) {
         errors.push({ endpoint, error: error.message });
       }
     }
 
-    throw new Error(`Poster transaction fetch failed: ${JSON.stringify(errors)}`);
+    throw new Error(`${errorPrefix}: ${JSON.stringify(errors)}`);
   }
 }
 

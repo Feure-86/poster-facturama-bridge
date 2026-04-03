@@ -53,7 +53,50 @@ function centsToAmount(value) {
   return Number((number / 100).toFixed(2));
 }
 
-function summarizeTicket(ticket) {
+function isTaxExemptCategory(categoryName) {
+  return String(categoryName || "").trim().toLowerCase() === "cafe en grano";
+}
+
+function mapTicketItems({ ticket, items }) {
+  const merged = new Map();
+
+  for (const item of items || []) {
+    const quantity = Number(item.num || item.count || 0);
+    const unitPrice = centsToAmount(item.product_price || 0);
+    const lineTotal = centsToAmount(item.payed_sum || item.product_price * quantity || 0);
+    const categoryName = item.category_name || null;
+    const isTaxExempt = isTaxExemptCategory(categoryName);
+    const key = String(item.product_id || "");
+    const existing = merged.get(key);
+    const next = existing
+      ? {
+          ...existing,
+          quantity: Number((existing.quantity + quantity).toFixed(4)),
+          line_total: Number((existing.line_total + lineTotal).toFixed(2)),
+          raw_payload: Array.isArray(existing.raw_payload) ? [...existing.raw_payload, item] : [existing.raw_payload, item]
+        }
+      : {
+      ticket_id: ticket?.id || null,
+      poster_ticket_id: ticket?.poster_ticket_id || ticket?.ticket_number || null,
+      product_id: key,
+      product_name: item.product_name || item.modification_name || null,
+      category_id: item.category_id != null ? String(item.category_id) : null,
+      category_name: categoryName,
+      quantity,
+      unit_price: unitPrice,
+      line_total: lineTotal,
+      is_tax_exempt: isTaxExempt,
+      tax_rate: isTaxExempt ? 0 : 0.16,
+      raw_payload: item
+    };
+
+    merged.set(key, next);
+  }
+
+  return [...merged.values()];
+}
+
+function summarizeTicket(ticket, items = []) {
   if (!ticket) {
     return null;
   }
@@ -82,8 +125,9 @@ function summarizeTicket(ticket) {
     dateStart: transactionDetail?.date_start || null,
     paymentType: transactionDetail?.pay_type ?? null,
     processingStatus: transactionDetail?.processing_status ?? null,
-    productCount: products.length,
+    productCount: items.length || products.length,
     products,
+    items,
     rawPayload: ticket.raw_payload || null
   };
 }
@@ -103,9 +147,11 @@ async function handleTicketLookup(ticketNumber, res) {
     return res.status(404).json({ ok: false, error: "Ticket not found" });
   }
 
+  const items = await persistence.getTicketItemsByTicketId(ticket.id);
+
   return res.status(200).json({
     ok: true,
-    ticket: summarizeTicket(ticket)
+    ticket: summarizeTicket(ticket, items)
   });
 }
 
@@ -283,6 +329,69 @@ app.post("/poster/webhook", async (req, res) => {
         skipped: true,
         reason: "missing-transaction-id"
       });
+    }
+
+    let savedTicket = null;
+    if (persistence.enabled) {
+      savedTicket = await persistSafely("Supabase ticket log", () =>
+        persistence.insertTicketLog({
+          event,
+          transactionId,
+          transactionDetail,
+          status: "received"
+        })
+      );
+    }
+
+    if (persistence.enabled && savedTicket?.id && accountId) {
+      const accessToken = await persistSafely("Poster access token", () =>
+        resolvePosterAccessToken({ accountId, posterService, persistence })
+      );
+
+      if (accessToken) {
+        const transactionProducts = await persistSafely("Poster transaction products", () =>
+          posterService.getTransactionProducts({
+            accountId,
+            accessToken,
+            transactionId
+          })
+        );
+
+        if (Array.isArray(transactionProducts) && transactionProducts.length > 0) {
+          const categoryIds = [...new Set(transactionProducts.map((item) => item.category_id).filter((value) => value != null))];
+          const categoryMap = new Map();
+
+          for (const categoryId of categoryIds) {
+            const category = await persistSafely("Poster category detail", () =>
+              posterService.getCategoryDetails({
+                accountId,
+                accessToken,
+                categoryId
+              })
+            );
+
+            if (category) {
+              categoryMap.set(String(categoryId), category.category_name || category.name || null);
+            }
+          }
+
+          const enrichedItems = transactionProducts.map((item) => ({
+            ...item,
+            category_name: item.category_id != null ? categoryMap.get(String(item.category_id)) || null : null
+          }));
+
+          await persistSafely("Supabase ticket items", () =>
+            persistence.upsertTicketItems({
+              ticketId: savedTicket.id,
+              posterTicketId: transactionId,
+              items: mapTicketItems({
+                ticket: savedTicket,
+                items: enrichedItems
+              })
+            })
+          );
+        }
+      }
     }
 
     const alreadyProcessed = await processedSaleStore.get(transactionId);
