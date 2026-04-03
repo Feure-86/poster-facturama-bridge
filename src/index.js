@@ -193,8 +193,7 @@ function buildFacturamaInvoiceFromTicket({ ticket, items, customer, config }) {
   const paymentForm = customer.paymentForm || toFacturamaPaymentForm(ticket.paymentType);
   const paymentMethod = customer.paymentMethod || "PUE";
 
-  return {
-    Serie: config.facturama.defaults.serie,
+  const invoicePayload = {
     Currency: config.facturama.defaults.currency,
     ExpeditionPlace: config.facturama.defaults.expeditionPlace,
     CfdiType: "I",
@@ -211,6 +210,12 @@ function buildFacturamaInvoiceFromTicket({ ticket, items, customer, config }) {
     Subtotal: subtotal,
     Total: total
   };
+
+  if (config.facturama.defaults.serie) {
+    invoicePayload.Serie = config.facturama.defaults.serie;
+  }
+
+  return invoicePayload;
 }
 
 async function handleTicketLookup(ticketNumber, res) {

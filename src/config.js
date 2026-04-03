@@ -38,7 +38,7 @@ const config = {
     password: process.env.FACTURAMA_PASSWORD,
     apiPath: process.env.FACTURAMA_API_PATH || "/3/cfdis",
     defaults: {
-      serie: process.env.FACTURAMA_SERIE || "A",
+      serie: process.env.FACTURAMA_SERIE || "",
       currency: process.env.FACTURAMA_CURRENCY || "MXN",
       expeditionPlace: process.env.FACTURAMA_EXPEDITION_PLACE || ""
     }
