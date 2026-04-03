@@ -44,6 +44,71 @@ async function resolvePosterAccessToken({ accountId, posterService, persistence 
   return connection?.access_token || null;
 }
 
+function centsToAmount(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return 0;
+  }
+
+  return Number((number / 100).toFixed(2));
+}
+
+function summarizeTicket(ticket) {
+  if (!ticket) {
+    return null;
+  }
+
+  const transactionDetail = ticket?.raw_payload?.transaction_detail || null;
+  const products = Array.isArray(transactionDetail?.products) ? transactionDetail.products : [];
+  const payedSum = transactionDetail?.payed_sum != null ? centsToAmount(transactionDetail.payed_sum) : Number(ticket.total || 0);
+  const sum = transactionDetail?.sum != null ? centsToAmount(transactionDetail.sum) : Number(ticket.total || 0);
+  const isClosed = Number(transactionDetail?.status || 0) === 2 || Number(transactionDetail?.date_close || 0) > 0 || payedSum > 0;
+  const isInvoiced = Boolean(ticket.invoice_id) || String(ticket.status || "").trim() === "invoiced";
+
+  return {
+    id: ticket.id || null,
+    ticketNumber: ticket.ticket_number || ticket.poster_ticket_id || null,
+    posterTicketId: ticket.poster_ticket_id || null,
+    accountId: ticket.poster_account_id || null,
+    total: Number(ticket.total || 0),
+    payedSum,
+    sum,
+    currency: ticket.currency || "MXN",
+    status: ticket.status || null,
+    invoiceId: ticket.invoice_id || null,
+    isClosed,
+    isInvoiced,
+    dateClose: transactionDetail?.date_close || null,
+    dateStart: transactionDetail?.date_start || null,
+    paymentType: transactionDetail?.pay_type ?? null,
+    processingStatus: transactionDetail?.processing_status ?? null,
+    productCount: products.length,
+    products,
+    rawPayload: ticket.raw_payload || null
+  };
+}
+
+async function handleTicketLookup(ticketNumber, res) {
+  const normalizedTicketNumber = String(ticketNumber || "").trim();
+  if (!normalizedTicketNumber) {
+    return res.status(400).json({ ok: false, error: "Missing ticket number" });
+  }
+
+  if (!persistence.enabled) {
+    return res.status(503).json({ ok: false, error: "Supabase persistence is required for ticket lookup" });
+  }
+
+  const ticket = await persistence.getTicketByNumber(normalizedTicketNumber);
+  if (!ticket) {
+    return res.status(404).json({ ok: false, error: "Ticket not found" });
+  }
+
+  return res.status(200).json({
+    ok: true,
+    ticket: summarizeTicket(ticket)
+  });
+}
+
 const posterService = new PosterService(
   {
     clientId: config.poster.clientId,
@@ -64,6 +129,24 @@ app.get("/health", async (_req, res) => {
     persistence: persistence.enabled ? "supabase+file" : "file",
     time: new Date().toISOString()
   });
+});
+
+app.get("/api/tickets/:ticketNumber", async (req, res) => {
+  try {
+    return await handleTicketLookup(req.params.ticketNumber, res);
+  } catch (error) {
+    console.error("Ticket lookup error:", error);
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+app.post("/api/tickets/lookup", async (req, res) => {
+  try {
+    return await handleTicketLookup(req.body?.ticket_number || req.body?.ticketNumber, res);
+  } catch (error) {
+    console.error("Ticket lookup error:", error);
+    return res.status(500).json({ ok: false, error: error.message });
+  }
 });
 
 app.post("/reports/monthly", async (req, res) => {

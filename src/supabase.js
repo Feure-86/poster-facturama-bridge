@@ -34,6 +34,9 @@ function createSupabasePersistence(config) {
       async getPosterConnection() {
         return null;
       },
+      async getTicketByNumber() {
+        return null;
+      },
       async insertTicketLog() {
         return null;
       }
@@ -88,6 +91,24 @@ function createSupabasePersistence(config) {
 
       if (error) {
         throw new Error(`Supabase poster_connections read failed: ${error.message}`);
+      }
+
+      return data || null;
+    },
+    async getTicketByNumber(ticketNumber) {
+      const normalizedTicketNumber = String(ticketNumber || "").trim();
+      if (!normalizedTicketNumber) {
+        return null;
+      }
+
+      const { data, error } = await client
+        .from("tickets")
+        .select("*")
+        .eq("ticket_number", normalizedTicketNumber)
+        .maybeSingle();
+
+      if (error) {
+        throw new Error(`Supabase tickets read failed: ${error.message}`);
       }
 
       return data || null;
