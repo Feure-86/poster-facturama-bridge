@@ -40,6 +40,15 @@ function createSupabasePersistence(config) {
       async getTicketItemsByTicketId() {
         return [];
       },
+      async markTicketInvoiced() {
+        return null;
+      },
+      async createInvoiceRequest() {
+        return null;
+      },
+      async createInvoiceRecord() {
+        return null;
+      },
       async insertTicketLog() {
         return null;
       },
@@ -136,6 +145,57 @@ function createSupabasePersistence(config) {
       }
 
       return data || [];
+    },
+    async markTicketInvoiced({ ticketId, invoiceId }) {
+      const normalizedTicketId = String(ticketId || "").trim();
+      if (!normalizedTicketId) {
+        return null;
+      }
+
+      const patch = {
+        invoice_id: invoiceId || null,
+        status: "invoiced",
+        updated_at: new Date().toISOString()
+      };
+
+      const { data, error } = await client
+        .from("tickets")
+        .update(patch)
+        .eq("id", normalizedTicketId)
+        .select("*")
+        .maybeSingle();
+
+      if (error) {
+        throw new Error(`Supabase tickets update failed: ${error.message}`);
+      }
+
+      return data || null;
+    },
+    async createInvoiceRequest(payload) {
+      const { data, error } = await client
+        .from("invoice_requests")
+        .insert(payload)
+        .select("*")
+        .maybeSingle();
+
+      if (error) {
+        throw new Error(`Supabase invoice_requests write failed: ${error.message}`);
+      }
+
+      return data || payload;
+    },
+    async createInvoiceRecord(payload) {
+      const { data, error } = await client
+        .from("invoices")
+        .insert(payload)
+        .select("*")
+        .maybeSingle();
+
+      if (error) {
+        throw new Error(`Supabase invoices write failed: ${error.message}`);
+      }
+
+      return data || payload;
     },
     async insertTicketLog({ event, transactionId, invoiceId = null, status = "received", transactionDetail = null }) {
       const total = transactionDetail?.payed_sum

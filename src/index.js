@@ -132,6 +132,87 @@ function summarizeTicket(ticket, items = []) {
   };
 }
 
+function roundMoney(value) {
+  return Number((Number(value || 0)).toFixed(2));
+}
+
+function toFacturamaPaymentForm(paymentType) {
+  const normalized = String(paymentType ?? "").trim();
+  if (normalized === "1") {
+    return "01";
+  }
+  if (normalized === "2") {
+    return "04";
+  }
+  if (normalized === "3") {
+    return "99";
+  }
+  return "99";
+}
+
+function buildFacturamaInvoiceFromTicket({ ticket, items, customer, config }) {
+  const facturamaItems = items.map((item) => {
+    const quantity = Number(item.quantity || 0);
+    const lineTotal = Number(item.line_total || 0);
+    const taxRate = Number(item.tax_rate || 0);
+    const isTaxExempt = Boolean(item.is_tax_exempt) || taxRate === 0;
+    const subtotal = isTaxExempt ? roundMoney(lineTotal) : roundMoney(lineTotal / (1 + taxRate));
+    const unitPrice = quantity > 0 ? roundMoney(subtotal / quantity) : subtotal;
+    const taxTotal = isTaxExempt ? 0 : roundMoney(lineTotal - subtotal);
+
+    const facturamaItem = {
+      ProductCode: "01010101",
+      IdentificationNumber: String(item.product_id || ""),
+      Description: item.product_name || "Producto",
+      Unit: "Pieza",
+      UnitCode: "H87",
+      UnitPrice: unitPrice,
+      Quantity: quantity,
+      Subtotal: subtotal,
+      Total: roundMoney(lineTotal),
+      TaxObject: isTaxExempt ? "01" : "02"
+    };
+
+    if (!isTaxExempt) {
+      facturamaItem.Taxes = [
+        {
+          Name: "IVA",
+          Base: subtotal,
+          Rate: taxRate,
+          Total: taxTotal,
+          IsRetention: false
+        }
+      ];
+    }
+
+    return facturamaItem;
+  });
+
+  const subtotal = roundMoney(facturamaItems.reduce((sum, item) => sum + Number(item.Subtotal || 0), 0));
+  const total = roundMoney(facturamaItems.reduce((sum, item) => sum + Number(item.Total || 0), 0));
+  const paymentForm = customer.paymentForm || toFacturamaPaymentForm(ticket.paymentType);
+  const paymentMethod = customer.paymentMethod || "PUE";
+
+  return {
+    Serie: config.facturama.defaults.serie,
+    Currency: config.facturama.defaults.currency,
+    ExpeditionPlace: config.facturama.defaults.expeditionPlace,
+    CfdiType: "I",
+    PaymentForm: paymentForm,
+    PaymentMethod: paymentMethod,
+    Receiver: {
+      Rfc: customer.rfc,
+      Name: customer.name,
+      CfdiUse: customer.cfdiUse,
+      FiscalRegime: customer.fiscalRegime,
+      TaxZipCode: customer.taxZipCode
+    },
+    Items: facturamaItems,
+    Subtotal: subtotal,
+    Total: total
+  };
+}
+
 async function handleTicketLookup(ticketNumber, res) {
   const normalizedTicketNumber = String(ticketNumber || "").trim();
   if (!normalizedTicketNumber) {
@@ -191,6 +272,124 @@ app.post("/api/tickets/lookup", async (req, res) => {
     return await handleTicketLookup(req.body?.ticket_number || req.body?.ticketNumber, res);
   } catch (error) {
     console.error("Ticket lookup error:", error);
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+app.post("/api/invoices/create", async (req, res) => {
+  try {
+    if (!persistence.enabled) {
+      return res.status(503).json({ ok: false, error: "Supabase persistence is required for invoice creation" });
+    }
+
+    const ticketNumber = String(req.body?.ticket_number || req.body?.ticketNumber || "").trim();
+    const customer = {
+      rfc: String(req.body?.rfc || "").trim().toUpperCase(),
+      name: String(req.body?.name || "").trim(),
+      fiscalRegime: String(req.body?.fiscal_regime || req.body?.fiscalRegime || "").trim(),
+      taxZipCode: String(req.body?.tax_zip_code || req.body?.taxZipCode || "").trim(),
+      cfdiUse: String(req.body?.cfdi_use || req.body?.cfdiUse || "").trim(),
+      email: String(req.body?.email || "").trim() || null,
+      paymentForm: String(req.body?.payment_form || req.body?.paymentForm || "").trim() || null,
+      paymentMethod: String(req.body?.payment_method || req.body?.paymentMethod || "").trim() || null
+    };
+
+    if (!ticketNumber) {
+      return res.status(400).json({ ok: false, error: "Missing ticket number" });
+    }
+
+    const missingCustomerFields = [
+      ["rfc", customer.rfc],
+      ["name", customer.name],
+      ["fiscal_regime", customer.fiscalRegime],
+      ["tax_zip_code", customer.taxZipCode],
+      ["cfdi_use", customer.cfdiUse]
+    ].filter(([, value]) => !value);
+
+    if (missingCustomerFields.length) {
+      return res.status(400).json({
+        ok: false,
+        error: `Missing required customer fields: ${missingCustomerFields.map(([key]) => key).join(", ")}`
+      });
+    }
+
+    const ticket = await persistence.getTicketByNumber(ticketNumber);
+    if (!ticket) {
+      return res.status(404).json({ ok: false, error: "Ticket not found" });
+    }
+
+    const items = await persistence.getTicketItemsByTicketId(ticket.id);
+    const summarizedTicket = summarizeTicket(ticket, items);
+
+    if (!summarizedTicket.isClosed) {
+      return res.status(409).json({ ok: false, error: "Ticket is not closed yet" });
+    }
+
+    if (summarizedTicket.isInvoiced) {
+      return res.status(409).json({ ok: false, error: "Ticket already invoiced", invoiceId: summarizedTicket.invoiceId });
+    }
+
+    if (!items.length) {
+      return res.status(409).json({ ok: false, error: "Ticket has no item details yet" });
+    }
+
+    const invoicePayload = buildFacturamaInvoiceFromTicket({
+      ticket: summarizedTicket,
+      items,
+      customer,
+      config
+    });
+
+    const invoiceRequestPayload = {
+      ticket_id: ticket.id,
+      ticket_number: summarizedTicket.ticketNumber,
+      poster_ticket_id: summarizedTicket.posterTicketId,
+      rfc: customer.rfc,
+      customer_name: customer.name,
+      fiscal_regime: customer.fiscalRegime,
+      tax_zip_code: customer.taxZipCode,
+      cfdi_use: customer.cfdiUse,
+      email: customer.email,
+      status: "requested",
+      payload: invoicePayload
+    };
+
+    const invoiceRequest = await persistSafely("Supabase invoice request", () =>
+      persistence.createInvoiceRequest(invoiceRequestPayload)
+    );
+
+    const invoice = await facturamaService.createInvoice(invoicePayload);
+
+    await persistSafely("Supabase mark ticket invoiced", () =>
+      persistence.markTicketInvoiced({
+        ticketId: ticket.id,
+        invoiceId: invoice?.Id || invoice?.id || null
+      })
+    );
+
+    await persistSafely("Supabase invoice record", () =>
+      persistence.createInvoiceRecord({
+        ticket_id: ticket.id,
+        ticket_number: summarizedTicket.ticketNumber,
+        poster_ticket_id: summarizedTicket.posterTicketId,
+        invoice_request_id: invoiceRequest?.id || null,
+        facturama_id: invoice?.Id || invoice?.id || null,
+        facturama_uuid: invoice?.Complement?.TaxStamp?.Uuid || invoice?.Uuid || null,
+        status: "issued",
+        total: summarizedTicket.total,
+        currency: summarizedTicket.currency,
+        raw_payload: invoice
+      })
+    );
+
+    return res.status(201).json({
+      ok: true,
+      ticketNumber: summarizedTicket.ticketNumber,
+      invoiceId: invoice?.Id || invoice?.id || null,
+      invoice
+    });
+  } catch (error) {
+    console.error("Invoice creation error:", error);
     return res.status(500).json({ ok: false, error: error.message });
   }
 });
