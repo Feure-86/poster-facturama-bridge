@@ -30,6 +30,20 @@ async function persistSafely(label, operation) {
   }
 }
 
+async function resolvePosterAccessToken({ accountId, posterService, persistence }) {
+  const savedInstallation = await posterService.getSavedInstallation(accountId);
+  if (savedInstallation?.accessToken) {
+    return savedInstallation.accessToken;
+  }
+
+  if (!persistence.enabled) {
+    return null;
+  }
+
+  const connection = await persistence.getPosterConnection(accountId);
+  return connection?.access_token || null;
+}
+
 const posterService = new PosterService(
   {
     clientId: config.poster.clientId,
@@ -152,6 +166,24 @@ app.post("/poster/webhook", async (req, res) => {
 
     const event = normalizePosterWebhookPayload(req.body || {});
     const transactionId = getTransactionId(event);
+    const accountId = String(event?.account_id || event?.account || event?.accountId || "").trim() || null;
+    let transactionDetail = null;
+
+    if (transactionId && accountId) {
+      const accessToken = await persistSafely("Poster access token", () =>
+        resolvePosterAccessToken({ accountId, posterService, persistence })
+      );
+
+      if (accessToken) {
+        transactionDetail = await persistSafely("Poster transaction detail", () =>
+          posterService.getTransactionDetails({
+            accountId,
+            accessToken,
+            transactionId
+          })
+        );
+      }
+    }
 
     if (!transactionId) {
       if (persistence.enabled) {
@@ -177,6 +209,7 @@ app.post("/poster/webhook", async (req, res) => {
           persistence.insertTicketLog({
             event,
             transactionId,
+            transactionDetail,
             invoiceId: alreadyProcessed.invoiceId || null,
             status: "duplicate"
           })
@@ -196,6 +229,7 @@ app.post("/poster/webhook", async (req, res) => {
           persistence.insertTicketLog({
             event,
             transactionId,
+            transactionDetail,
             status: "invoice-not-requested"
           })
         );
@@ -216,6 +250,7 @@ app.post("/poster/webhook", async (req, res) => {
         persistence.insertTicketLog({
           event,
           transactionId,
+          transactionDetail,
           invoiceId: invoice?.Id || invoice?.id || null,
           status: "invoiced"
         })

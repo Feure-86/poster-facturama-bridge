@@ -90,6 +90,74 @@ class PosterService {
     await this.tokenStore.set(storageKey, value);
     return value;
   }
+
+  async getSavedInstallation(accountId) {
+    if (!accountId) {
+      return null;
+    }
+
+    return this.tokenStore.get(String(accountId).trim());
+  }
+
+  async getTransactionDetails({ accountId, accessToken, transactionId }) {
+    if (!accessToken) {
+      throw new Error("Missing Poster access token");
+    }
+
+    if (!transactionId) {
+      throw new Error("Missing Poster transaction id");
+    }
+
+    const qs = querystring.stringify({
+      token: accessToken,
+      transaction_id: transactionId,
+      include_products: true,
+      include_history: true,
+      include_delivery: true
+    });
+
+    const endpoints = [
+      accountId ? `https://${accountId}.joinposter.com/api/dash.getTransaction` : null,
+      "https://joinposter.com/api/dash.getTransaction"
+    ].filter(Boolean);
+
+    const errors = [];
+    for (const endpoint of endpoints) {
+      try {
+        const response = await fetch(`${endpoint}?${qs}`, {
+          method: "GET",
+          headers: {
+            Accept: "application/json"
+          }
+        });
+
+        const text = await response.text();
+        let payload;
+        try {
+          payload = JSON.parse(text);
+        } catch (_) {
+          payload = { raw: text };
+        }
+
+        if (!response.ok) {
+          errors.push({ endpoint, status: response.status, payload });
+          continue;
+        }
+
+        const normalized = payload?.response || payload?.data || payload;
+        const transaction = Array.isArray(normalized) ? normalized[0] : normalized;
+        if (transaction && typeof transaction === "object") {
+          return transaction;
+        }
+
+        errors.push({ endpoint, status: response.status, payload });
+      } catch (error) {
+        errors.push({ endpoint, error: error.message });
+      }
+    }
+
+    throw new Error(`Poster transaction fetch failed: ${JSON.stringify(errors)}`);
+  }
 }
 
 module.exports = { PosterService };
