@@ -53,8 +53,17 @@ function centsToAmount(value) {
   return Number((number / 100).toFixed(2));
 }
 
+function normalizeCategoryName(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
 function isTaxExemptCategory(categoryName) {
-  return String(categoryName || "").trim().toLowerCase() === "cafe en grano";
+  const normalized = normalizeCategoryName(categoryName);
+  return normalized === "cafe en grano" || normalized.includes("cafe en grano");
 }
 
 function mapTicketItems({ ticket, items }) {
@@ -346,6 +355,7 @@ app.post("/api/invoices/create", async (req, res) => {
     });
 
     const invoiceRequestPayload = {
+      poster_account_id: summarizedTicket.accountId,
       ticket_id: ticket.id,
       ticket_number: summarizedTicket.ticketNumber,
       poster_ticket_id: summarizedTicket.posterTicketId,
@@ -374,6 +384,7 @@ app.post("/api/invoices/create", async (req, res) => {
 
     await persistSafely("Supabase invoice record", () =>
       persistence.createInvoiceRecord({
+        poster_account_id: summarizedTicket.accountId,
         ticket_id: ticket.id,
         ticket_number: summarizedTicket.ticketNumber,
         poster_ticket_id: summarizedTicket.posterTicketId,
