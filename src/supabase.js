@@ -24,15 +24,6 @@ function centsToAmount(value) {
   return Number((number / 100).toFixed(2));
 }
 
-function pickFirstValue(object, keys) {
-  for (const key of keys) {
-    if (object[key] !== undefined) {
-      return object[key];
-    }
-  }
-  return undefined;
-}
-
 function createSupabasePersistence(config) {
   if (!config.supabase.url || !config.supabase.serviceRoleKey) {
     return {
@@ -68,55 +59,29 @@ function createSupabasePersistence(config) {
   }
 
   const client = createClient(config.supabase.url, config.supabase.serviceRoleKey);
-  const tableColumnsCache = new Map();
+  async function insertWithFallbacks(tableName, candidateRows) {
+    let lastError = null;
 
-  async function getTableColumns(tableName) {
-    if (tableColumnsCache.has(tableName)) {
-      return tableColumnsCache.get(tableName);
-    }
-
-    const { data, error } = await client
-      .from("information_schema.columns")
-      .select("column_name")
-      .eq("table_schema", "public")
-      .eq("table_name", tableName);
-
-    if (error) {
-      throw new Error(`Supabase schema read failed for ${tableName}: ${error.message}`);
-    }
-
-    const columns = new Set((data || []).map((row) => row.column_name));
-    tableColumnsCache.set(tableName, columns);
-    return columns;
-  }
-
-  async function insertAdaptiveRecord({ tableName, payload, aliases = {} }) {
-    const columns = await getTableColumns(tableName);
-    const row = {};
-
-    for (const columnName of columns) {
-      const candidateKeys = aliases[columnName] || [columnName];
-      const value = pickFirstValue(payload, candidateKeys);
-      if (value !== undefined) {
-        row[columnName] = value;
+    for (const row of candidateRows) {
+      const filteredRow = Object.fromEntries(Object.entries(row).filter(([, value]) => value !== undefined));
+      if (Object.keys(filteredRow).length === 0) {
+        continue;
       }
+
+      const { data, error } = await client
+        .from(tableName)
+        .insert(filteredRow)
+        .select("*")
+        .maybeSingle();
+
+      if (!error) {
+        return data || filteredRow;
+      }
+
+      lastError = error;
     }
 
-    if (Object.keys(row).length === 0) {
-      throw new Error(`Supabase ${tableName} write failed: no compatible columns found for payload`);
-    }
-
-    const { data, error } = await client
-      .from(tableName)
-      .insert(row)
-      .select("*")
-      .maybeSingle();
-
-    if (error) {
-      throw new Error(`Supabase ${tableName} write failed: ${error.message}`);
-    }
-
-    return data || row;
+    throw new Error(`Supabase ${tableName} write failed: ${lastError ? lastError.message : "no compatible insert payload"}`);
   }
 
   return {
@@ -231,51 +196,50 @@ function createSupabasePersistence(config) {
       return data || null;
     },
     async createInvoiceRequest(payload) {
-      return insertAdaptiveRecord({
-        tableName: "invoice_requests",
+      return insertWithFallbacks("invoice_requests", [
         payload,
-        aliases: {
-          poster_account_id: ["poster_account_id", "account_id"],
-          poster_ticket_id: ["poster_ticket_id", "ticket_number"],
-          ticket_id: ["ticket_id"],
-          ticket_number: ["ticket_number", "poster_ticket_id"],
-          rfc: ["rfc", "customer_rfc"],
-          customer_rfc: ["customer_rfc", "rfc"],
-          customer_name: ["customer_name", "name"],
-          name: ["name", "customer_name"],
-          fiscal_regime: ["fiscal_regime"],
-          tax_zip_code: ["tax_zip_code"],
-          cfdi_use: ["cfdi_use"],
-          email: ["email"],
-          status: ["status"],
-          payload: ["payload", "raw_payload", "request_payload"],
-          raw_payload: ["raw_payload", "payload", "request_payload"],
-          request_payload: ["request_payload", "payload", "raw_payload"]
+        {
+          poster_account_id: payload.poster_account_id,
+          poster_ticket_id: payload.poster_ticket_id,
+          ticket_id: payload.ticket_id,
+          ticket_number: payload.ticket_number,
+          rfc: payload.rfc,
+          customer_name: payload.customer_name,
+          fiscal_regime: payload.fiscal_regime,
+          tax_zip_code: payload.tax_zip_code,
+          cfdi_use: payload.cfdi_use,
+          email: payload.email,
+          status: payload.status,
+          payload: payload.payload
+        },
+        {
+          poster_account_id: payload.poster_account_id,
+          poster_ticket_id: payload.poster_ticket_id,
+          rfc: payload.rfc,
+          customer_name: payload.customer_name,
+          email: payload.email,
+          status: payload.status
         }
-      });
+      ]);
     },
     async createInvoiceRecord(payload) {
-      return insertAdaptiveRecord({
-        tableName: "invoices",
+      return insertWithFallbacks("invoices", [
         payload,
-        aliases: {
-          poster_account_id: ["poster_account_id", "account_id"],
-          poster_ticket_id: ["poster_ticket_id", "ticket_number"],
-          ticket_id: ["ticket_id"],
-          ticket_number: ["ticket_number", "poster_ticket_id"],
-          invoice_request_id: ["invoice_request_id"],
-          facturama_invoice_id: ["facturama_invoice_id", "facturama_id"],
-          facturama_id: ["facturama_id", "facturama_invoice_id"],
-          facturama_uuid: ["facturama_uuid"],
-          uuid: ["facturama_uuid", "uuid"],
-          status: ["status"],
-          total: ["total"],
-          currency: ["currency"],
-          payload: ["payload", "raw_payload", "invoice_payload"],
-          raw_payload: ["raw_payload", "payload", "invoice_payload"],
-          invoice_payload: ["invoice_payload", "raw_payload", "payload"]
+        {
+          poster_account_id: payload.poster_account_id,
+          poster_ticket_id: payload.poster_ticket_id,
+          invoice_request_id: payload.invoice_request_id,
+          facturama_invoice_id: payload.facturama_invoice_id || payload.facturama_id,
+          facturama_uuid: payload.facturama_uuid,
+          pdf_url: payload.pdf_url
+        },
+        {
+          poster_account_id: payload.poster_account_id,
+          poster_ticket_id: payload.poster_ticket_id,
+          facturama_invoice_id: payload.facturama_invoice_id || payload.facturama_id,
+          facturama_uuid: payload.facturama_uuid
         }
-      });
+      ]);
     },
     async insertTicketLog({ event, transactionId, invoiceId = null, status = "received", transactionDetail = null }) {
       const total = transactionDetail?.payed_sum

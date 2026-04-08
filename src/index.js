@@ -163,15 +163,17 @@ function buildFacturamaInvoiceFromTicket({ ticket, items, customer, config }) {
   const facturamaItems = items.map((item) => {
     const quantity = Number(item.quantity || 0);
     const lineTotal = Number(item.line_total || 0);
-    const taxRate = Number(item.tax_rate || 0);
-    const isTaxExempt = Boolean(item.is_tax_exempt) || taxRate === 0;
+    const categoryTaxExempt = isTaxExemptCategory(item.category_name);
+    const storedTaxExempt = Boolean(item.is_tax_exempt);
+    const isTaxExempt = categoryTaxExempt || storedTaxExempt;
+    const taxRate = isTaxExempt ? 0 : 0.16;
     const subtotal = isTaxExempt ? roundMoney(lineTotal) : roundMoney(lineTotal / (1 + taxRate));
     const unitPrice = quantity > 0 ? roundMoney(subtotal / quantity) : subtotal;
     const taxTotal = isTaxExempt ? 0 : roundMoney(lineTotal - subtotal);
 
     const facturamaItem = {
       ProductCode: "01010101",
-      IdentificationNumber: String(item.product_id || ""),
+      IdentificationNumber: String(ticket.ticketNumber || ticket.posterTicketId || ""),
       Description: item.product_name || "Producto",
       Unit: "Pieza",
       UnitCode: "H87",
@@ -389,8 +391,10 @@ app.post("/api/invoices/create", async (req, res) => {
         ticket_number: summarizedTicket.ticketNumber,
         poster_ticket_id: summarizedTicket.posterTicketId,
         invoice_request_id: invoiceRequest?.id || null,
+        facturama_invoice_id: invoice?.Id || invoice?.id || null,
         facturama_id: invoice?.Id || invoice?.id || null,
         facturama_uuid: invoice?.Complement?.TaxStamp?.Uuid || invoice?.Uuid || null,
+        pdf_url: invoice?.PdfUrl || invoice?.pdfUrl || null,
         status: "issued",
         total: summarizedTicket.total,
         currency: summarizedTicket.currency,
