@@ -37,6 +37,9 @@ function createSupabasePersistence(config) {
       async getTicketByNumber() {
         return null;
       },
+      async getInvoiceByPosterTicketId() {
+        return null;
+      },
       async getTicketItemsByTicketId() {
         return [];
       },
@@ -151,6 +154,24 @@ function createSupabasePersistence(config) {
       }
 
       return data || null;
+    },
+    async getInvoiceByPosterTicketId(posterTicketId) {
+      const normalizedPosterTicketId = String(posterTicketId || "").trim();
+      if (!normalizedPosterTicketId) {
+        return null;
+      }
+
+      const { data, error } = await client
+        .from("invoices")
+        .select("*")
+        .eq("poster_ticket_id", normalizedPosterTicketId)
+        .limit(1);
+
+      if (error) {
+        throw new Error(`Supabase invoices read failed: ${error.message}`);
+      }
+
+      return Array.isArray(data) && data.length ? data[0] : null;
     },
     async getTicketItemsByTicketId(ticketId) {
       const normalizedTicketId = String(ticketId || "").trim();

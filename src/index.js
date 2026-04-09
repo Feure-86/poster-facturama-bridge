@@ -336,13 +336,23 @@ app.post("/api/invoices/create", async (req, res) => {
 
     const items = await persistence.getTicketItemsByTicketId(ticket.id);
     const summarizedTicket = summarizeTicket(ticket, items);
+    const existingInvoice = await persistence.getInvoiceByPosterTicketId(summarizedTicket.posterTicketId);
 
     if (!summarizedTicket.isClosed) {
       return res.status(409).json({ ok: false, error: "Ticket is not closed yet" });
     }
 
-    if (summarizedTicket.isInvoiced) {
-      return res.status(409).json({ ok: false, error: "Ticket already invoiced", invoiceId: summarizedTicket.invoiceId });
+    if (summarizedTicket.isInvoiced || existingInvoice) {
+      return res.status(409).json({
+        ok: false,
+        error: "Ticket already invoiced",
+        invoiceId:
+          existingInvoice?.facturama_invoice_id ||
+          existingInvoice?.facturama_id ||
+          summarizedTicket.invoiceId ||
+          null,
+        uuid: existingInvoice?.facturama_uuid || null
+      });
     }
 
     if (!items.length) {
@@ -377,6 +387,19 @@ app.post("/api/invoices/create", async (req, res) => {
 
     const invoice = await facturamaService.createInvoice(invoicePayload);
 
+    let emailDelivery = null;
+    if (customer.email) {
+      emailDelivery = await persistSafely("Facturama email delivery", () =>
+        facturamaService.sendInvoiceByEmail({
+          cfdiType: "issued",
+          cfdiId: invoice?.Id || invoice?.id || null,
+          email: customer.email,
+          subject: `Factura ticket ${summarizedTicket.ticketNumber}`,
+          comments: `Factura correspondiente al ticket ${summarizedTicket.ticketNumber}`
+        })
+      );
+    }
+
     await persistSafely("Supabase mark ticket invoiced", () =>
       persistence.markTicketInvoiced({
         ticketId: ticket.id,
@@ -406,6 +429,7 @@ app.post("/api/invoices/create", async (req, res) => {
       ok: true,
       ticketNumber: summarizedTicket.ticketNumber,
       invoiceId: invoice?.Id || invoice?.id || null,
+      emailSent: Boolean(emailDelivery),
       invoice
     });
   } catch (error) {
