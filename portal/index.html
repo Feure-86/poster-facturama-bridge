@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Autofacturación Relato</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Manrope:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <aside class="hero-panel">
+        <div class="hero-mark">RELATO</div>
+        <h1>Portal de autofacturación</h1>
+        <p>
+          Busca tu ticket, revisa el consumo y emite tu factura en pocos pasos.
+        </p>
+        <div class="hero-notes">
+          <div class="hero-note">
+            <span class="hero-step">1</span>
+            <div>
+              <strong>Busca tu ticket</strong>
+              <p>Ingresa el número de compra para validar que el consumo esté cerrado.</p>
+            </div>
+          </div>
+          <div class="hero-note">
+            <span class="hero-step">2</span>
+            <div>
+              <strong>Captura tus datos fiscales</strong>
+              <p>RFC, razón social, régimen, código postal y uso de CFDI.</p>
+            </div>
+          </div>
+          <div class="hero-note">
+            <span class="hero-step">3</span>
+            <div>
+              <strong>Recibe tu factura</strong>
+              <p>La generamos y, si el correo es válido, también se envía por email.</p>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <main class="form-panel">
+        <section class="card ticket-card">
+          <div class="card-header">
+            <span class="eyebrow">Paso 1</span>
+            <h2>Buscar ticket</h2>
+          </div>
+
+          <form id="lookup-form" class="stack">
+            <label class="field">
+              <span>Número de ticket</span>
+              <input id="ticket-number" name="ticket_number" type="text" inputmode="numeric" placeholder="Ej. 43567" required />
+            </label>
+            <button type="submit" class="button button-primary">Buscar ticket</button>
+          </form>
+
+          <div id="lookup-message" class="message hidden"></div>
+
+          <div id="ticket-summary" class="ticket-summary hidden">
+            <div class="summary-header">
+              <div>
+                <span class="eyebrow">Ticket encontrado</span>
+                <h3 id="summary-ticket-number">Ticket</h3>
+              </div>
+              <span id="summary-status" class="status-pill">Pendiente</span>
+            </div>
+
+            <dl class="summary-grid">
+              <div>
+                <dt>Total</dt>
+                <dd id="summary-total">$0.00</dd>
+              </div>
+              <div>
+                <dt>Moneda</dt>
+                <dd id="summary-currency">MXN</dd>
+              </div>
+              <div>
+                <dt>Productos</dt>
+                <dd id="summary-product-count">0</dd>
+              </div>
+              <div>
+                <dt>Pago</dt>
+                <dd id="summary-payment-method">-</dd>
+              </div>
+            </dl>
+
+            <div class="items-box">
+              <h4>Productos del ticket</h4>
+              <ul id="summary-items"></ul>
+            </div>
+          </div>
+        </section>
+
+        <section class="card invoice-card">
+          <div class="card-header">
+            <span class="eyebrow">Paso 2</span>
+            <h2>Datos fiscales</h2>
+          </div>
+
+          <form id="invoice-form" class="stack">
+            <input id="invoice-ticket-number" name="ticket_number" type="hidden" />
+
+            <div class="grid two-up">
+              <label class="field">
+                <span>RFC</span>
+                <input name="rfc" type="text" placeholder="XAXX010101000" required />
+              </label>
+
+              <label class="field">
+                <span>Código postal</span>
+                <input name="tax_zip_code" type="text" inputmode="numeric" placeholder="97148" required />
+              </label>
+            </div>
+
+            <label class="field">
+              <span>Razón social / nombre fiscal</span>
+              <input name="name" type="text" placeholder="Nombre o razón social" required />
+            </label>
+
+            <div class="grid two-up">
+              <label class="field">
+                <span>Régimen fiscal</span>
+                <select name="fiscal_regime" required>
+                  <option value="">Selecciona una opción</option>
+                  <option value="601">601 - General de Ley Personas Morales</option>
+                  <option value="612">612 - Personas Físicas con Actividades Empresariales</option>
+                  <option value="616">616 - Sin obligaciones fiscales</option>
+                  <option value="626">626 - Régimen Simplificado de Confianza</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>Uso de CFDI</span>
+                <select name="cfdi_use" required>
+                  <option value="">Selecciona una opción</option>
+                  <option value="G03">G03 - Gastos en general</option>
+                  <option value="S01">S01 - Sin efectos fiscales</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="grid two-up">
+              <label class="field">
+                <span>Método de pago</span>
+                <select name="payment_method">
+                  <option value="PUE">PUE - Pago en una sola exhibición</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>Forma de pago</span>
+                <select name="payment_form">
+                  <option value="">Usar la del ticket</option>
+                  <option value="01">01 - Efectivo</option>
+                  <option value="04">04 - Tarjeta de crédito</option>
+                  <option value="28">28 - Tarjeta de débito</option>
+                  <option value="99">99 - Por definir</option>
+                </select>
+              </label>
+            </div>
+
+            <label class="field">
+              <span>Correo electrónico</span>
+              <input name="email" type="email" placeholder="tu-correo@ejemplo.com" />
+            </label>
+
+            <button type="submit" class="button button-primary" disabled id="invoice-submit">
+              Generar factura
+            </button>
+          </form>
+
+          <div id="invoice-message" class="message hidden"></div>
+        </section>
+      </main>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
