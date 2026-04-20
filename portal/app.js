@@ -16,6 +16,8 @@ const summaryProductCount = document.getElementById("summary-product-count");
 const summaryPaymentMethod = document.getElementById("summary-payment-method");
 const summaryItems = document.getElementById("summary-items");
 const invoiceTicketNumber = document.getElementById("invoice-ticket-number");
+const invoiceTicketAmount = document.getElementById("invoice-ticket-amount");
+const fiscalNameInput = document.getElementById("fiscal-name");
 
 function setMessage(element, type, text) {
   element.className = `message ${type}`;
@@ -46,6 +48,22 @@ function describePaymentForm(paymentType) {
     default:
       return "Sin definir";
   }
+}
+
+function normalizeFiscalName(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase();
+}
+
+function normalizeAmountInput(value) {
+  const amount = Number(value || 0);
+  if (!Number.isFinite(amount)) {
+    return "";
+  }
+
+  return amount.toFixed(2);
 }
 
 function renderTicketSummary(ticket) {
@@ -81,6 +99,16 @@ async function wakeBackend() {
   }
 }
 
+if (fiscalNameInput) {
+  fiscalNameInput.addEventListener("input", (event) => {
+    const cursor = event.target.selectionStart;
+    event.target.value = normalizeFiscalName(event.target.value);
+    if (cursor != null) {
+      event.target.setSelectionRange(cursor, cursor);
+    }
+  });
+}
+
 lookupForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   clearMessage(lookupMessage);
@@ -90,9 +118,15 @@ lookupForm.addEventListener("submit", async (event) => {
 
   const formData = new FormData(lookupForm);
   const ticketNumber = String(formData.get("ticket_number") || "").trim();
+  const ticketAmount = String(formData.get("amount") || "").trim();
 
   if (!ticketNumber) {
     setMessage(lookupMessage, "error", "Ingresa un número de ticket.");
+    return;
+  }
+
+  if (!ticketAmount) {
+    setMessage(lookupMessage, "error", "Ingresa el monto total del ticket.");
     return;
   }
 
@@ -105,7 +139,10 @@ lookupForm.addEventListener("submit", async (event) => {
       headers: {
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({ ticket_number: ticketNumber })
+      body: JSON.stringify({
+        ticket_number: ticketNumber,
+        amount: ticketAmount
+      })
     });
     const data = await response.json();
 
@@ -115,6 +152,7 @@ lookupForm.addEventListener("submit", async (event) => {
 
     renderTicketSummary(data.ticket);
     invoiceTicketNumber.value = data.ticket.ticketNumber || ticketNumber;
+    invoiceTicketAmount.value = normalizeAmountInput(ticketAmount);
     invoiceSubmit.disabled = !data.ticket.isClosed || data.ticket.isInvoiced;
 
     if (data.ticket.isInvoiced) {
@@ -139,9 +177,15 @@ invoiceForm.addEventListener("submit", async (event) => {
 
   const formData = new FormData(invoiceForm);
   const payload = Object.fromEntries(formData.entries());
+  payload.name = normalizeFiscalName(payload.name);
 
   if (!payload.ticket_number) {
     setMessage(invoiceMessage, "error", "Primero busca un ticket válido.");
+    return;
+  }
+
+  if (!payload.amount) {
+    setMessage(invoiceMessage, "error", "Vuelve a buscar el ticket con su monto antes de facturar.");
     return;
   }
 

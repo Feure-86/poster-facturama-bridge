@@ -158,6 +158,18 @@ function roundMoney(value) {
   return Number((Number(value || 0)).toFixed(2));
 }
 
+function normalizeFiscalText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .trim();
+}
+
+function amountsMatch(left, right) {
+  return roundMoney(left) === roundMoney(right);
+}
+
 function toFacturamaPaymentForm(paymentType) {
   const normalized = String(paymentType ?? "").trim();
   if (normalized === "1") {
@@ -243,9 +255,21 @@ function buildFacturamaInvoiceFromTicket({ ticket, items, customer, config }) {
 }
 
 async function handleTicketLookup(ticketNumber, res) {
-  const normalizedTicketNumber = String(ticketNumber || "").trim();
+  const payload =
+    typeof ticketNumber === "object" && ticketNumber !== null
+      ? ticketNumber
+      : { ticket_number: ticketNumber };
+  const normalizedTicketNumber = String(payload.ticket_number || payload.ticketNumber || "").trim();
+  const requestedAmount = payload.amount != null && String(payload.amount).trim() !== ""
+    ? Number(payload.amount)
+    : null;
+
   if (!normalizedTicketNumber) {
     return res.status(400).json({ ok: false, error: "Missing ticket number" });
+  }
+
+  if (requestedAmount != null && !Number.isFinite(requestedAmount)) {
+    return res.status(400).json({ ok: false, error: "Invalid ticket amount" });
   }
 
   if (!persistence.enabled) {
@@ -258,10 +282,18 @@ async function handleTicketLookup(ticketNumber, res) {
   }
 
   const items = await persistence.getTicketItemsByTicketId(ticket.id);
+  const summarized = summarizeTicket(ticket, items);
+
+  if (requestedAmount != null) {
+    const expectedAmount = summarized.payedSum || summarized.total || 0;
+    if (!amountsMatch(expectedAmount, requestedAmount)) {
+      return res.status(404).json({ ok: false, error: "Ticket number and amount do not match" });
+    }
+  }
 
   return res.status(200).json({
     ok: true,
-    ticket: summarizeTicket(ticket, items)
+    ticket: summarized
   });
 }
 
@@ -298,7 +330,7 @@ app.get("/api/tickets/:ticketNumber", async (req, res) => {
 
 app.post("/api/tickets/lookup", async (req, res) => {
   try {
-    return await handleTicketLookup(req.body?.ticket_number || req.body?.ticketNumber, res);
+    return await handleTicketLookup(req.body || {}, res);
   } catch (error) {
     console.error("Ticket lookup error:", error);
     return res.status(500).json({ ok: false, error: error.message });
@@ -314,7 +346,7 @@ app.post("/api/invoices/create", async (req, res) => {
     const ticketNumber = String(req.body?.ticket_number || req.body?.ticketNumber || "").trim();
     const customer = {
       rfc: String(req.body?.rfc || "").trim().toUpperCase(),
-      name: String(req.body?.name || "").trim(),
+      name: normalizeFiscalText(req.body?.name || ""),
       fiscalRegime: String(req.body?.fiscal_regime || req.body?.fiscalRegime || "").trim(),
       taxZipCode: String(req.body?.tax_zip_code || req.body?.taxZipCode || "").trim(),
       cfdiUse: String(req.body?.cfdi_use || req.body?.cfdiUse || "").trim(),
@@ -322,9 +354,19 @@ app.post("/api/invoices/create", async (req, res) => {
       paymentForm: String(req.body?.payment_form || req.body?.paymentForm || "").trim() || null,
       paymentMethod: String(req.body?.payment_method || req.body?.paymentMethod || "").trim() || null
     };
+    const requestedAmount =
+      req.body?.amount != null && String(req.body.amount).trim() !== ""
+        ? Number(req.body.amount)
+        : req.body?.ticket_amount != null && String(req.body.ticket_amount).trim() !== ""
+          ? Number(req.body.ticket_amount)
+          : null;
 
     if (!ticketNumber) {
       return res.status(400).json({ ok: false, error: "Missing ticket number" });
+    }
+
+    if (requestedAmount != null && !Number.isFinite(requestedAmount)) {
+      return res.status(400).json({ ok: false, error: "Invalid ticket amount" });
     }
 
     const missingCustomerFields = [
@@ -350,6 +392,13 @@ app.post("/api/invoices/create", async (req, res) => {
     const items = await persistence.getTicketItemsByTicketId(ticket.id);
     const summarizedTicket = summarizeTicket(ticket, items);
     const existingInvoice = await persistence.getInvoiceByPosterTicketId(summarizedTicket.posterTicketId);
+
+    if (requestedAmount != null) {
+      const expectedAmount = summarizedTicket.payedSum || summarizedTicket.total || 0;
+      if (!amountsMatch(expectedAmount, requestedAmount)) {
+        return res.status(409).json({ ok: false, error: "Ticket number and amount do not match" });
+      }
+    }
 
     if (!summarizedTicket.isClosed) {
       return res.status(409).json({ ok: false, error: "Ticket is not closed yet" });
