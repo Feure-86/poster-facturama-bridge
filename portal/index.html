@@ -18,14 +18,14 @@
         <div class="hero-mark">RELATO</div>
         <h1>Portal de autofacturación</h1>
         <p>
-          Busca tu ticket, revisa el consumo y emite tu factura en pocos pasos.
+          Busca tu ticket, revisa el consumo sin propina y emite tu factura en pocos pasos.
         </p>
         <div class="hero-notes">
           <div class="hero-note">
             <span class="hero-step">1</span>
             <div>
               <strong>Busca tu ticket</strong>
-              <p>Ingresa el número de compra para validar que el consumo esté cerrado.</p>
+              <p>Ingresa el número de compra y el monto total sin propina para validar el consumo.</p>
             </div>
           </div>
           <div class="hero-note">
@@ -59,10 +59,11 @@
                 <input id="ticket-number" name="ticket_number" type="text" inputmode="numeric" placeholder="Ej. 43567" required />
               </label>
               <label class="field">
-                <span>Monto total del ticket</span>
-                <input id="ticket-amount" name="amount" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Ej. 350.00" required />
+                <span>Monto total del ticket (sin propina)</span>
+                <input id="ticket-amount" name="amount" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Ej. 350.00 sin propina" required />
               </label>
             </div>
+            <p class="field-hint">Captura el monto total del consumo sin incluir propina.</p>
             <button type="submit" class="button button-primary">Buscar ticket</button>
           </form>
 
