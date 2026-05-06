@@ -185,12 +185,18 @@ function toFacturamaPaymentForm(paymentType) {
 }
 
 function buildFacturamaInvoiceFromTicket({ ticket, items, customer, config }) {
-  const facturamaItems = items.map((item) => {
+  const normalizedItems = (items || []).filter((item) => {
+    const quantity = Number(item.quantity || 0);
+    const lineTotal = Number(item.line_total || 0);
+    return quantity > 0 && lineTotal > 0;
+  });
+
+  const facturamaItems = normalizedItems.map((item) => {
     const quantity = Number(item.quantity || 0);
     const lineTotal = Number(item.line_total || 0);
     const categoryTaxExempt = isTaxExemptCategory(item.category_name);
     const storedTaxExempt = Boolean(item.is_tax_exempt);
-    const isTaxExempt = categoryTaxExempt || storedTaxExempt;
+    const isTaxExempt = categoryTaxExempt || storedTaxExempt || lineTotal <= 0;
     const taxRate = isTaxExempt ? 0 : 0.16;
     const subtotal = isTaxExempt ? roundMoney(lineTotal) : roundMoney(lineTotal / (1 + taxRate));
     const unitPrice = quantity > 0 ? roundMoney(subtotal / quantity) : subtotal;
@@ -209,7 +215,7 @@ function buildFacturamaInvoiceFromTicket({ ticket, items, customer, config }) {
       TaxObject: isTaxExempt ? "01" : "02"
     };
 
-    if (!isTaxExempt) {
+    if (!isTaxExempt && subtotal > 0 && taxTotal >= 0) {
       facturamaItem.Taxes = [
         {
           Name: "IVA",
@@ -223,6 +229,10 @@ function buildFacturamaInvoiceFromTicket({ ticket, items, customer, config }) {
 
     return facturamaItem;
   });
+
+  if (!facturamaItems.length) {
+    throw new Error("Ticket has no invoiceable items");
+  }
 
   const subtotal = roundMoney(facturamaItems.reduce((sum, item) => sum + Number(item.Subtotal || 0), 0));
   const total = roundMoney(facturamaItems.reduce((sum, item) => sum + Number(item.Total || 0), 0));
